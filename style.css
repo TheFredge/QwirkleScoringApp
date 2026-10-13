@@ -19,9 +19,9 @@ input,select{font:inherit;padding:6px 8px;border-radius:6px;border:1px solid var
 .player.active{border-color:var(--accent)}
 .player .score{font-size:1.8rem;font-weight:700}
 .player small{opacity:.7}
-.boardwrap{overflow:auto;max-height:60vh;border:1px solid var(--line);border-radius:8px;background:#0000000d}
+.boardwrap{overflow:auto;height:max(420px,68vh);border:1px solid var(--line);border-radius:8px;background:#0000000d}
 .board{display:grid;width:max-content;margin:6px}
-.cell{width:44px;height:44px;border:1px solid var(--line);padding:0;border-radius:4px;background:transparent;display:flex}
+.cell{width:var(--cs);height:var(--cs);border:1px solid var(--line);padding:0;border-radius:4px;background:transparent;display:flex}
 .cell.tile{background:var(--tile);border-color:var(--tile)}
 .cell.pending{outline:3px solid var(--accent);outline-offset:-3px}
 .cell svg{width:100%;height:100%}
@@ -33,3 +33,4 @@ input,select{font:inherit;padding:6px 8px;border-radius:6px;border:1px solid var
 .log{max-height:180px;overflow:auto;margin:0;padding-left:18px;font-size:.9rem}
 .banner{font-size:1.2rem;font-weight:700}
 .confirm{display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-color:var(--accent)}
+.boardbar{margin-bottom:8px}.boardbar button{min-width:40px}.cell.origin:not(.tile){background:#0000000a}

@@ -64,7 +64,7 @@
       current: starter, board: [], bag: Q.TOTAL_TILES - Q.HAND * players.length,
       passes: 0, log: [], undo: [], turn: 1,
     };
-    pending = []; selected = null;
+    pending = []; selected = null; view = null;
     save(); render();
   }
 
@@ -155,17 +155,21 @@
     app.querySelectorAll('.ln,.nm').forEach(i => i.addEventListener('change', () => { sync(); save(); render(); }));
   }
 
-  function renderBoard(res) {
+  let cs = 56;           // board cell size in px (zoom)
+  let view = null;       // {x0, y0, left, top} of the last rendered board, to keep the view steady as it grows
+  const MARGIN = 3;      // empty rows/columns kept around the tiles so the grid grows ahead of play
+
+  function renderBoard() {
     const all = state.board.concat(pending);
     const xs = all.map(t => t.x), ys = all.map(t => t.y);
-    const x0 = Math.min(-3, ...xs) - 1, x1 = Math.max(3, ...xs) + 1;
-    const y0 = Math.min(-3, ...ys) - 1, y1 = Math.max(3, ...ys) + 1;
-    const grid = el('div', { class: 'board', style: 'grid-template-columns:repeat(' + (x1 - x0 + 1) + ',44px)' });
+    const x0 = Math.min(-4, ...xs) - MARGIN, x1 = Math.max(4, ...xs) + MARGIN;
+    const y0 = Math.min(-4, ...ys) - MARGIN, y1 = Math.max(4, ...ys) + MARGIN;
+    const grid = el('div', { class: 'board', style: 'grid-template-columns:repeat(' + (x1 - x0 + 1) + ',var(--cs))' });
     const at = new Map(state.board.map(t => [t.x + ',' + t.y, t]));
     const pend = new Map(pending.map(t => [t.x + ',' + t.y, t]));
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
       const k = x + ',' + y, t = at.get(k) || pend.get(k);
-      const cell = el('button', { class: 'cell' + (at.has(k) ? ' tile' : '') + (pend.has(k) ? ' tile pending' : ''), 'aria-label': 'Space ' + x + ',' + y, disabled: at.has(k) || state.phase === 'over' });
+      const cell = el('button', { class: 'cell' + (at.has(k) ? ' tile' : '') + (pend.has(k) ? ' tile pending' : '') + (x === 0 && y === 0 ? ' origin' : ''), 'aria-label': 'Space ' + x + ',' + y, disabled: at.has(k) || state.phase === 'over' });
       if (t) cell.append(tileSVG(t.c, t.s));
       cell.addEventListener('click', () => {
         if (pend.has(k)) pending = pending.filter(p => p.x + ',' + p.y !== k);
@@ -174,7 +178,26 @@
       });
       grid.append(cell);
     }
-    return el('div', { class: 'boardwrap' }, grid);
+    const zoom = d => () => { cs = Math.min(96, Math.max(28, cs + d)); render(); };
+    const wrap = el('div', { class: 'boardwrap', style: '--cs:' + cs + 'px' }, grid);
+    const bar = el('div', { class: 'row boardbar' },
+      el('button', { onclick: zoom(-8), 'aria-label': 'Zoom out' }, '−'),
+      el('button', { onclick: zoom(8), 'aria-label': 'Zoom in' }, '+'),
+      el('small', {}, (x1 - x0 + 1) + ' × ' + (y1 - y0 + 1) + ' grid — it grows as you play; scroll to move around'));
+    // keep the viewport steady: restore scroll, shifted if the grid grew up/left; centre on first draw
+    requestAnimationFrame(() => {
+      if (view) {
+        wrap.scrollLeft = view.left + (view.x0 - x0) * cs;
+        wrap.scrollTop = view.top + (view.y0 - y0) * cs;
+      } else {
+        wrap.scrollLeft = (wrap.scrollWidth - wrap.clientWidth) / 2;
+        wrap.scrollTop = (wrap.scrollHeight - wrap.clientHeight) / 2;
+      }
+      view = { x0, y0, left: wrap.scrollLeft, top: wrap.scrollTop };
+    });
+    wrap.addEventListener('scroll', () => { view = { x0, y0, left: wrap.scrollLeft, top: wrap.scrollTop }; });
+    // render() reads prior scroll from `view`, which the scroll listener keeps current
+    return el('div', {}, bar, wrap);
   }
 
   function renderPlay() {
@@ -227,7 +250,7 @@
     app.replaceChildren(
       el('section', { class: 'card' }, players,
         el('p', {}, el('small', {}, 'Bag: ' + state.bag + ' tiles · Turn ' + state.turn + (over ? '' : ' · ' + p.name + ' to play')))),
-      el('section', { class: 'card' }, renderBoard(res), msg, controls),
+      el('section', { class: 'card' }, renderBoard(), msg, controls),
       over ? null : el('section', { class: 'card' }, el('h2', {}, 'Tiles (' + 'tap to select, then tap board)'), pal),
       el('section', { class: 'card' }, el('h2', {}, 'Log'),
         el('ol', { class: 'log' }, state.log.slice().reverse().map(l => el('li', {}, l)))));

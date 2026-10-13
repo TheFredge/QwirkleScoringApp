@@ -1,0 +1,10 @@
+{
+  "name": "qwirkle-scoring-app",
+  "version": "1.0.0",
+  "description": "Scoring app for the Qwirkle tile game",
+  "scripts": {
+    "test": "node --test test/scoring.test.js",
+    "start": "python3 -m http.server 8000"
+  },
+  "license": "MIT"
+}

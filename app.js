@@ -8,7 +8,8 @@
 
   let state = load() || { phase: 'setup' };
   let pending = [];      // tiles placed this turn, not yet committed
-  let selected = null;   // {c,s} chosen from the palette
+  let selected = null;   // {c,s} chosen from the dock
+  let selC = 0, selS = null; // dock picker state
   let ui = null;         // in-page confirmation: {kind:'exchange'|'end'|'abandon', n}
   const app = document.getElementById('app');
 
@@ -155,7 +156,7 @@
     app.querySelectorAll('.ln,.nm').forEach(i => i.addEventListener('change', () => { sync(); save(); render(); }));
   }
 
-  let cs = 56;           // board cell size in px (zoom)
+  let cs = window.innerWidth < 520 ? 46 : 56;           // board cell size in px (zoom)
   let view = null;       // {x0, y0, left, top} of the last rendered board, to keep the view steady as it grows
   const MARGIN = 3;      // empty rows/columns kept around the tiles so the grid grows ahead of play
 
@@ -183,7 +184,7 @@
     const bar = el('div', { class: 'row boardbar' },
       el('button', { onclick: zoom(-8), 'aria-label': 'Zoom out' }, '−'),
       el('button', { onclick: zoom(8), 'aria-label': 'Zoom in' }, '+'),
-      el('small', {}, (x1 - x0 + 1) + ' × ' + (y1 - y0 + 1) + ' grid — it grows as you play; scroll to move around'));
+      el('small', {}, (x1 - x0 + 1) + ' × ' + (y1 - y0 + 1) + ' grid, grows as you play'));
     // keep the viewport steady: restore scroll, shifted if the grid grew up/left; centre on first draw
     requestAnimationFrame(() => {
       if (view) {
@@ -216,42 +217,49 @@
         el('strong', {}, pl.name), el('div', { class: 'score' }, pl.score),
         el('small', {}, pl.hand + ' tiles in hand'))));
 
-    const pal = el('div', { class: 'palette' });
-    for (let c = 0; c < 6; c++) for (let s = 0; s < 6; s++) {
-      const left = Q.COPIES - (used.get(c * 6 + s) || 0);
-      const b = el('button', { class: 'pal' + (selected && selected.c === c && selected.s === s ? ' sel' : ''), disabled: left <= 0 || over,
-        title: COLOR_NAME[c] + ' ' + SHAPE_NAME[s] + ' (' + left + ' left)', onclick: () => { selected = { c, s }; render(); } },
-        tileSVG(c, s), el('b', {}, left));
-      pal.append(b);
-    }
+    // two-step picker (color, then shape) keeps the dock short enough for a phone
+    const colors = el('div', { class: 'pick colors' }, COLOR_HEX.map((hex, c) =>
+      el('button', { class: 'swatch' + (selC === c ? ' sel' : ''), style: 'background:' + hex, disabled: over,
+        'aria-label': COLOR_NAME[c], 'aria-pressed': selC === c, onclick: () => { selC = c; selected = selS == null ? null : { c, s: selS }; render(); } })));
+    const shapes = el('div', { class: 'pick shapes' }, SHAPE_NAME.map((nm, s) => {
+      const left = Q.COPIES - (used.get(selC * 6 + s) || 0);
+      const on = selected && selected.c === selC && selected.s === s;
+      return el('button', { class: 'pal' + (on ? ' sel' : ''), disabled: left <= 0 || over, 'aria-label': COLOR_NAME[selC] + ' ' + nm + ', ' + left + ' left', 'aria-pressed': !!on,
+        onclick: () => { selS = s; selected = { c: selC, s }; render(); } }, tileSVG(selC, s), el('b', {}, left));
+    }));
 
     let msg;
     if (over) {
       const top = Math.max(...state.players.map(x => x.score));
       const w = state.players.filter(x => x.score === top).map(x => x.name);
       msg = el('div', { class: 'banner' }, '🏆 ' + (w.length > 1 ? 'Tie: ' + w.join(' & ') : w[0] + ' wins') + ' with ' + top + ' points!');
-    } else if (!pending.length) msg = el('div', { class: 'msg' }, board || p.name + ': pick a tile below, then tap board spaces.');
+    } else if (!pending.length) msg = el('div', { class: 'msg' }, board || p.name + ': pick a color and shape below, then tap board spaces.');
     else if (tooMany) msg = el('div', { class: 'msg bad' }, p.name + ' only has ' + p.hand + ' tiles in hand.');
     else if (!res.ok) msg = el('div', { class: 'msg bad' }, res.error);
     else msg = el('div', { class: 'msg good' }, '+' + res.score + ' points' + (res.qwirkles ? ' — QWIRKLE!' : '') +
       (pending.length === p.hand && state.bag === 0 ? ' (+' + Q.GO_OUT_BONUS + ' for going out)' : ''));
 
     const canPlay = res && res.ok && !tooMany;
-    const controls = over
+    const actions = over
       ? el('div', { class: 'row' }, el('button', { onclick: undoTurn, disabled: !state.undo.length }, 'Undo last turn'), el('button', { class: 'primary', onclick: () => { state = { phase: 'setup' }; save(); render(); } }, 'New game'))
-      : el('div', { class: 'row' },
-        el('button', { class: 'primary', disabled: !canPlay, onclick: commitPlay }, 'Score turn'),
-        el('button', { disabled: !pending.length, onclick: () => { pending = []; render(); } }, 'Clear'),
+      : el('div', { class: 'row actions' },
         el('button', { disabled: Math.min(p.hand, state.bag) < 1, onclick: () => { ui = { kind: 'exchange', n: 1 }; render(); } }, 'Exchange tiles'),
         el('button', { onclick: pass }, 'Pass'),
         el('button', { disabled: !state.undo.length, onclick: undoTurn }, 'Undo last turn'),
-        el('button', { class: 'ghost', disabled: state.bag > 0, onclick: () => { ui = { kind: 'end' }; render(); } }, 'End game (no plays left)'));
+        el('button', { class: 'ghost', disabled: state.bag > 0, onclick: () => { ui = { kind: 'end' }; render(); } }, 'End game'));
+
+    const dock = over ? null : el('section', { class: 'dock' },
+      msg, colors, shapes,
+      el('div', { class: 'row dockbtns' },
+        el('button', { class: 'primary', disabled: !canPlay, onclick: commitPlay }, 'Score turn'),
+        el('button', { disabled: !pending.length, onclick: () => { pending = []; render(); } }, 'Clear')));
 
     app.replaceChildren(
       el('section', { class: 'card' }, players,
         el('p', {}, el('small', {}, 'Bag: ' + state.bag + ' tiles · Turn ' + state.turn + (over ? '' : ' · ' + p.name + ' to play')))),
-      el('section', { class: 'card' }, renderBoard(), msg, controls),
-      over ? null : el('section', { class: 'card' }, el('h2', {}, 'Tiles (' + 'tap to select, then tap board)'), pal),
+      el('section', { class: 'card' }, renderBoard(), over ? msg : null),
+      dock,
+      el('section', { class: 'card' }, actions),
       el('section', { class: 'card' }, el('h2', {}, 'Log'),
         el('ol', { class: 'log' }, state.log.slice().reverse().map(l => el('li', {}, l)))));
   }

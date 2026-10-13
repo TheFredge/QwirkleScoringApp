@@ -9,6 +9,7 @@
   let state = load() || { phase: 'setup' };
   let pending = [];      // tiles placed this turn, not yet committed
   let selected = null;   // {c,s} chosen from the palette
+  let ui = null;         // in-page confirmation: {kind:'exchange'|'end'|'abandon', n}
   const app = document.getElementById('app');
 
   function load() { try { return JSON.parse(localStorage.getItem(STORE)); } catch (e) { return null; } }
@@ -96,15 +97,12 @@
     pending = []; save(); render();
   }
 
-  function exchange() {
+  function exchange(v) {
     const p = state.players[state.current];
-    const max = Math.min(p.hand, state.bag);
-    if (max < 1) return;
-    const v = parseInt(prompt('How many tiles to exchange (1–' + max + ')?', '1'), 10);
-    if (!(v >= 1 && v <= max)) return;
+    if (!(v >= 1 && v <= Math.min(p.hand, state.bag))) return;
     snapshot();
     state.log.push(p.name + ' exchanged ' + v + ' tile' + (v > 1 ? 's' : '') + ' (+0)');
-    state.passes = 0; nextPlayer(); pending = []; save(); render();
+    state.passes = 0; nextPlayer(); pending = []; ui = null; save(); render();
   }
 
   function pass() {
@@ -114,8 +112,7 @@
   }
 
   function endStalemate() {
-    if (!confirm('End the game with no going-out bonus? (Nobody can play.)')) return;
-    snapshot(); state.log.push('Game ended — no more legal plays.'); state.phase = 'over'; save(); render();
+    snapshot(); state.log.push('Game ended — no more legal plays.'); state.phase = 'over'; ui = null; save(); render();
   }
 
   function undoTurn() {
@@ -222,10 +219,10 @@
       : el('div', { class: 'row' },
         el('button', { class: 'primary', disabled: !canPlay, onclick: commitPlay }, 'Score turn'),
         el('button', { disabled: !pending.length, onclick: () => { pending = []; render(); } }, 'Clear'),
-        el('button', { disabled: Math.min(p.hand, state.bag) < 1, onclick: exchange }, 'Exchange tiles'),
+        el('button', { disabled: Math.min(p.hand, state.bag) < 1, onclick: () => { ui = { kind: 'exchange', n: 1 }; render(); } }, 'Exchange tiles'),
         el('button', { onclick: pass }, 'Pass'),
         el('button', { disabled: !state.undo.length, onclick: undoTurn }, 'Undo last turn'),
-        el('button', { class: 'ghost', disabled: state.bag > 0, onclick: endStalemate }, 'End game (no plays left)'));
+        el('button', { class: 'ghost', disabled: state.bag > 0, onclick: () => { ui = { kind: 'end' }; render(); } }, 'End game (no plays left)'));
 
     app.replaceChildren(
       el('section', { class: 'card' }, players,
@@ -236,10 +233,32 @@
         el('ol', { class: 'log' }, state.log.slice().reverse().map(l => el('li', {}, l)))));
   }
 
-  function render() { state.phase === 'setup' ? renderSetup() : renderPlay(); }
+  function confirmBar() {
+    if (!ui) return null;
+    const cancel = el('button', { onclick: () => { ui = null; render(); } }, 'Cancel');
+    if (ui.kind === 'exchange') {
+      const p = state.players[state.current], max = Math.min(p.hand, state.bag);
+      if (max < 1) { ui = null; return null; }
+      const sel = el('select', { id: 'exN', 'aria-label': 'Tiles to exchange' },
+        Array.from({ length: max }, (_, i) => el('option', { value: i + 1, selected: ui.n === i + 1 }, String(i + 1))));
+      sel.addEventListener('change', () => { ui.n = +sel.value; });
+      return el('section', { class: 'card confirm' }, el('span', {}, p.name + ' exchanges '), sel, el('span', {}, ' tile(s) (scores 0).'),
+        el('button', { class: 'primary', onclick: () => exchange(ui.n) }, 'Exchange'), cancel);
+    }
+    const text = ui.kind === 'end' ? 'End the game with no going-out bonus? Use this only when nobody can play.' : 'Abandon this game and start a new one?';
+    const go = ui.kind === 'end' ? endStalemate : () => { state = { phase: 'setup' }; pending = []; ui = null; save(); render(); };
+    return el('section', { class: 'card confirm' }, el('span', {}, text), el('button', { class: 'primary', onclick: go }, 'Yes'), cancel);
+  }
+
+  function render() {
+    state.phase === 'setup' ? renderSetup() : renderPlay();
+    const bar = confirmBar();
+    if (bar) app.prepend(bar);
+  }
 
   document.getElementById('newGame').addEventListener('click', () => {
-    if (state.phase === 'setup' || confirm('Abandon this game and start a new one?')) { state = { phase: 'setup' }; pending = []; save(); render(); }
+    if (state.phase === 'setup') return;
+    ui = { kind: 'abandon' }; render();
   });
   render();
 })();

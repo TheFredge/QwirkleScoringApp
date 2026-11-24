@@ -3,7 +3,8 @@
 
 Looks through every version of every file and every commit (names, emails, messages)
 for things the repo rules say must never be in a repo: keys, passwords, private links,
-email addresses, phone numbers, exact GPS points, street addresses, home network addresses.
+email addresses, phone numbers, exact GPS points, street addresses, home network addresses,
+photos that still carry location data, and risky file names (keys, database copies).
 
 Run it from inside the repo folder:
 
@@ -18,7 +19,9 @@ Run it from inside the repo folder:
          kind of problem and the file, never the text found or the names on commits.
 
 Anything deliberately kept (for example a town a feature needs) goes in .privacy-allow,
-one per line, with a comment saying why. Lines starting with # are comments.
+one per line, with a comment saying why. Lines starting with # are comments. A finding is
+only let through when it sits inside an exact copy of an allowed line (capital letters
+don't matter), so a short line can't hide anything else.
 
 A repo whose older versions were deliberately left as they are (a decision in the GitHub
 note) has a .privacy-baseline file holding the last old commit ID. Versions from before it
@@ -28,6 +31,7 @@ Exit code 0 = nothing found, 1 = something to review.
 """
 import argparse
 import re
+import struct
 import subprocess
 import sys
 from collections import defaultdict
@@ -46,6 +50,13 @@ CHECKS = [
     ("Slack token", r"\bxox[abpr]-[0-9A-Za-z-]{10,}"),
     ("AWS key", r"\bAKIA[0-9A-Z]{16}\b"),
     ("Supabase secret key", r"\bsb_secret_[0-9A-Za-z_\-]{10,}"),
+    ("Anthropic or OpenAI key", r"\bsk-(ant-|proj-)?[0-9A-Za-z_\-]{20,}"),
+    ("Tailscale key", r"\btskey-[0-9A-Za-z_\-]{10,}"),
+    ("Google sign-in secret", r"\bGOCSPX-[0-9A-Za-z_\-]{20,}"),
+    ("Plex token", r"(?i)x-plex-token\s*[=:]\s*[\"']?[0-9A-Za-z_\-]{10,}"),
+    ("Key or token in a web address", r"(?i)[?&](access_token|api_key|apikey|token|key|auth)=[0-9A-Za-z_\-]{16,}"),
+    ("Webhook link", r"(?i)hooks\.slack\.com/services/\S+|discord(app)?\.com/api/webhooks/\S+|\b\d{8,10}:AA[0-9A-Za-z_\-]{30,}"),
+    ("Key or token written in the code", r"(?i)\b(api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|token)\s*[:=]\s*[\"'][^\"'\s]{12,}[\"']"),
     ("Signed token (JWT)", r"\beyJ[0-9A-Za-z_\-]{10,}\.[0-9A-Za-z_\-]{10,}\.[0-9A-Za-z_\-]{10,}"),
     ("Password written in the code", r"(?i)\b(password|passwd|pwd|secret)\s*[:=]\s*[\"'][^\"'\s]{4,}[\"']"),
     ("Private calendar link", r"(?i)calendar\.google\.com/calendar/ical/|/private-[0-9a-f]{16,}/|webcal:/{2}\S+|\bhttps?://\S+\.ics\b"),
@@ -55,7 +66,40 @@ CHECKS = [
     ("Street address", r"\b\d{1,5}\s+(?:[A-Z][a-z]+\s){1,3}(?:Street|St|Road|Rd|Avenue|Ave|Lane|Ln|Drive|Dr|Court|Ct|Pass|Way|Place|Pl|Boulevard|Blvd|Terrace|Ter|Circle|Cir|Trail|Trl)\b"),
     ("Home network address", r"\b(10\.\d{1,3}|192\.168|172\.(1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}\b|\b100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}\b|\b[\w-]+\.ts\.net\b"),
 ]
-RISKY_FILES = re.compile(r"(?i)(^|/)(\.env(\..*)?|.*\.pem|.*\.key|.*\.p12|id_rsa.*|id_ed25519.*|credentials.*\.json|secrets?\..*|.*\.ics)$")
+RISKY_FILES = re.compile(r"(?i)(^|/)(\.env(?!\.example$)(\..*)?|.*\.pem|.*\.key|.*\.p12|id_rsa.*|id_ed25519.*|credentials.*\.json|secrets?\..*|.*\.ics"
+                         r"|.*\.(dump|sqlite3?|db|backup|bak)|.*\.sql\.(gz|zip|bz2|xz))$")
+PHOTO_FILES = re.compile(r"(?i)\.(jpe?g|heic|heif|tiff?|png|webp|dng)$")
+HIDDEN = ("Google API key", "Stripe key", "Resend key", "GitHub token", "Slack token", "AWS key",
+          "Supabase secret key", "Anthropic or OpenAI key", "Tailscale key", "Google sign-in secret",
+          "Plex token", "Key or token in a web address", "Webhook link", "Key or token written in the code",
+          "Signed token (JWT)", "Password written in the code")
+
+
+def photo_has_location(body):
+    """True when a photo's hidden details (Exif) include a GPS section."""
+    at = body.find(b"Exif\0\0")
+    if at >= 0:
+        tiff = body[at + 6: at + 6 + 65536]
+    else:  # PNG and some HEIC files keep Exif without the marker
+        at = body.find(b"eXIf")
+        if at < 0:
+            return False
+        tiff = body[at + 4: at + 4 + 65536]
+    big = tiff[:2] == b"MM"
+    if tiff[:2] not in (b"MM", b"II"):
+        return False
+    tag = b"\x88\x25" if big else b"\x25\x88"
+    endian = ">" if big else "<"
+    try:
+        first = struct.unpack(endian + "I", tiff[4:8])[0]
+        count = struct.unpack(endian + "H", tiff[first:first + 2])[0]
+        for n in range(count):
+            entry = tiff[first + 2 + 12 * n: first + 14 + 12 * n]
+            if entry[:2] == tag:
+                return True
+    except (struct.error, IndexError):
+        return tag in tiff[:4096]
+    return False
 
 
 def git(repo, *args, data=None):
@@ -99,19 +143,29 @@ def main():
         base = ""
     since = ["--not", base] if base else []
 
-    def is_allowed(text):
+    def allowed_spans(text):
         low = text.lower()
-        return any(a in low or low in a for a in allowed_lower)
+        spans = []
+        for a in allowed_lower:
+            start = low.find(a)
+            while start >= 0:
+                spans.append((start, start + len(a)))
+                start = low.find(a, start + 1)
+        return spans
+
+    def is_allowed_email(email):
+        return email.lower() in allowed_lower
 
     findings = defaultdict(set)  # (check, matched text) -> places
 
     def look(text, place):
+        spans = allowed_spans(text) if allowed_lower else []
         for name, rx in checks:
             for m in rx.finditer(text):
                 hit = m.group(0)
                 if name == "Email address" and SAFE_EMAILS.search(hit):
                     continue
-                if is_allowed(hit):
+                if any(a <= m.start() and m.end() <= b for a, b in spans):
                     continue
                 findings[(name, hit)].add(place)
 
@@ -128,8 +182,11 @@ def main():
         sha, _, path = line.partition(" ")
         if path:
             paths[sha].add(path)
-            if RISKY_FILES.search(path):
-                findings[("Risky file name", path)].add(path)
+    # Every file name ever used, even when its contents match another file's (git lists those only once above)
+    ever = git(repo, "log", "--all", *since, "--name-only", "--format=").decode("utf-8", "replace").splitlines()
+    for path in set(ever) | {l.partition(" ")[2] for l in listing}:
+        if path and RISKY_FILES.search(path):
+            findings[("Risky file name", path)].add(path)
     shas = list(dict.fromkeys(l.split(" ", 1)[0] for l in listing))
     out = git(repo, "cat-file", "--batch", data=("\n".join(shas) + "\n").encode())
     i = 0
@@ -138,8 +195,12 @@ def main():
         sha, typ, size = out[i:nl].decode().split()
         body = out[nl + 1: nl + 1 + int(size)]
         i = nl + 1 + int(size) + 1
+        names = paths.get(sha, {"(file)"})
         if typ == "blob" and b"\0" not in body[:8000]:
-            look(body.decode("utf-8", "replace"), ", ".join(sorted(paths.get(sha, {"(file)"}))))
+            look(body.decode("utf-8", "replace"), ", ".join(sorted(names)))
+        elif typ == "blob" and any(PHOTO_FILES.search(n) for n in names) and photo_has_location(body):
+            for n in names:
+                findings[("Photo with hidden location data", n)].add(n)
 
     # Commit names, emails and messages
     log = git(repo, "log", "--all", *since, "--format=%h%x00%an%x00%ae%x00%cn%x00%ce%x00%B%x01").decode("utf-8", "replace")
@@ -151,7 +212,7 @@ def main():
         h, an, ae, cn, ce, msg = parts
         for name, email in ((an, ae), (cn, ce)):
             people.add(f"{name} <{email}>")
-            if not SAFE_EMAILS.search(email) and not is_allowed(email):
+            if not SAFE_EMAILS.search(email) and not is_allowed_email(email):
                 findings[("Real email on a commit", email)].add(f"commit {h}")
         look(msg, f"commit message {h}")
 
@@ -167,8 +228,7 @@ def main():
     print(f"\n{len(findings)} thing(s) to review:")
     for (name, hit), places in sorted(findings.items()):
         shown = hit if len(hit) <= 80 else hit[:77] + "..."
-        if name in ("Google API key", "Stripe key", "Resend key", "GitHub token", "Slack token", "AWS key",
-                    "Supabase secret key", "Signed token (JWT)", "Password written in the code"):
+        if name in HIDDEN:
             shown = hit[:8] + "…(hidden)"
         if args.ci:
             shown = "(hidden in the automatic check; run the check by hand to see it)"

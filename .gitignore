@@ -1,0 +1,13 @@
+# Keep secrets and personal files out of this repo (see CLAUDE.md, rule 2)
+.env
+.env.*
+*.ics
+*.pem
+*.key
+*.p12
+id_rsa*
+id_ed25519*
+credentials*.json
+secrets.*
+.DS_Store
+node_modules/

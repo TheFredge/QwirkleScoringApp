@@ -1,0 +1,3 @@
+# Things deliberately kept in this repo that the privacy check (scripts/privacy_scan.py) would flag.
+# One per line, exactly as it appears in the files. Put a comment above each one saying why it's OK,
+# for example: "The ski area's public address, needed for navigation", then the address on the next line.

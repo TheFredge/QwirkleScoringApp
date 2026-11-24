@@ -15,3 +15,12 @@ Rules enforced / scored:
 - First player to empty their hand once the bag is empty gets +6 and ends the game; highest score wins.
 
 Undo reverses the last turn. Run rule tests with `npm test`.
+
+## Privacy
+
+This repo is public, in case it gets a GitHub Pages site. It holds nothing personal or secret:
+
+- No passwords, keys, names or email addresses.
+- Player names and game progress are saved only in your own browser, never in this repo.
+
+The rules this repo follows are in `CLAUDE.md`. `scripts/privacy_scan.py` checks every version of every file against them, and GitHub runs that check automatically after every push.

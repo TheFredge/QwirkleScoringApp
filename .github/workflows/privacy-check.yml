@@ -1,0 +1,32 @@
+# Automatic privacy check (CLAUDE.md, rule 5).
+# GitHub runs this after every push. If the check finds something, the run fails and GitHub emails the owner.
+# The names and places to look for come from the repo's PRIVACY_WORDS secret, never from a file.
+# Anyone can read a public repo's results, so the check only reports the kind of problem and the file.
+name: Privacy check
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  privacy-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get every version of this repo
+        env:
+          TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          git clone --quiet "https://x-access-token:${TOKEN}@github.com/${REPO}.git" repo
+          git -C repo fetch --quiet origin '+refs/pull/*:refs/remotes/origin/pr/*' || true
+      - name: Check every version of every file and every commit
+        env:
+          PRIVACY_WORDS: ${{ secrets.PRIVACY_WORDS }}
+        run: |
+          if [ -z "$PRIVACY_WORDS" ]; then
+            echo "::warning::The PRIVACY_WORDS secret isn't set, so names and places aren't being checked."
+          fi
+          python3 repo/scripts/privacy_scan.py --ci --path repo --also "$PRIVACY_WORDS"

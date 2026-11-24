@@ -2,7 +2,7 @@
 
 These are the owner's standard rules for every repo. Follow them in every session, before changing anything. This file is a word-for-word copy of the master in the GitHub note in the owner's Obsidian vault (Homelab → Services → GitHub). If the vault tools are available, read that note first. If its rules version is newer than the one below, the note wins and this file should be updated to match (rule 8).
 
-Rules version: 2026-11-24
+Rules version: 2026-11-24.2
 
 Explain everything to the owner in plain language, not developer shorthand.
 
@@ -37,6 +37,7 @@ Explain everything to the owner in plain language, not developer shorthand.
 - **README.md** with a **Privacy** section: what's deliberately left out and where it lives instead. Start from the README in `repo-template`.
 - **.gitignore** from `repo-template`, which keeps out `.env` files, calendar files, key files and Mac `.DS_Store` files.
 - **.privacy-allow** listing anything deliberately kept that the privacy check would flag (for example a public place's address), each with a comment saying why.
+- **.privacy-baseline**, only in a repo whose older versions were deliberately left as they are (a decision in the GitHub note). It holds the last old commit ID. The privacy check skips versions from before it, and always checks the current files.
 - **These rules as `CLAUDE.md`**, a word-for-word copy of the master (rule 8), so every Claude session in the repo reads them.
 - **The privacy check script**, `scripts/privacy_scan.py`.
 - **The automatic privacy check**, `.github/workflows/privacy-check.yml`. GitHub runs it after every push and emails the owner if it finds something. The words it looks for come from the repo's `PRIVACY_WORDS` secret (Settings → Secrets and variables → Actions), never from a file. Its results only name the kind of problem and the file, never the text found, because anyone can read a public repo's results.
@@ -56,7 +57,7 @@ The automatic check on GitHub (rule 5) is a backup alarm. It runs after the push
 ## 7. If something slips out
 1. If it's a key or password, change it first, so the leaked one stops working.
 2. Clean every older version in a copy, check the copy with rule 6, and show the owner what changed.
-3. GitHub keeps old versions viewable by their commit ID, and Pages build records and pull requests link to them. For a small repo with no forks: the owner deletes the repo and creates it again with the same name, Claude pushes the cleaned copy, and the owner turns Pages back on (the page address stays the same). For a bigger repo: ask GitHub Support to purge the old versions.
+3. GitHub keeps old versions viewable by their commit ID, and Pages build records and pull requests link to them. For a small repo with no forks: the owner deletes the repo and creates it again with the same name, Claude pushes the cleaned copy, and the owner turns Pages back on (the page address stays the same). For a bigger repo: ask GitHub Support to purge the old versions. For a private repo, cleaning from here on can be enough, with a `.privacy-baseline`; the owner decides, and the decision goes in the GitHub note.
 4. Update any commit IDs mentioned in the vault notes.
 5. Log it in the GitHub note and the project note.
 

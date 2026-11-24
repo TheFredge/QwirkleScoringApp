@@ -19,9 +19,11 @@ jobs:
         env:
           TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          PUSHED: ${{ github.sha }}
         run: |
           git clone --quiet "https://x-access-token:${TOKEN}@github.com/${REPO}.git" repo
           git -C repo fetch --quiet origin '+refs/pull/*:refs/remotes/origin/pr/*' || true
+          git -C repo checkout --quiet "$PUSHED"   # use the check script from the version just pushed
       - name: Check every version of every file and every commit
         env:
           PRIVACY_WORDS: ${{ secrets.PRIVACY_WORDS }}

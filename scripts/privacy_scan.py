@@ -20,6 +20,10 @@ Run it from inside the repo folder:
 Anything deliberately kept (for example a town a feature needs) goes in .privacy-allow,
 one per line, with a comment saying why. Lines starting with # are comments.
 
+A repo whose older versions were deliberately left as they are (a decision in the GitHub
+note) has a .privacy-baseline file holding the last old commit ID. Versions from before it
+are skipped; the current files of every branch are always checked.
+
 Exit code 0 = nothing found, 1 = something to review.
 """
 import argparse
@@ -62,6 +66,7 @@ def main():
     ap = argparse.ArgumentParser(description="Privacy check for every version of a git repo.")
     ap.add_argument("--also", default="", help="comma-separated extra words to look for (not saved anywhere)")
     ap.add_argument("--path", default=".", help="repo folder (default: current folder)")
+    ap.add_argument("--since", default="", help="skip versions from before this commit (normally read from .privacy-baseline)")
     ap.add_argument("--ci", action="store_true",
                     help="for the automatic check on GitHub: report the kind of problem and the file, never the text found or any names")
     args = ap.parse_args()
@@ -73,14 +78,26 @@ def main():
         checks.append(("Word you asked to look for", re.compile(r"(?i)\b(" + "|".join(re.escape(w) for w in extra) + r")\b")))
 
     allowed = []
+    top = git(repo, "rev-parse", "--show-toplevel").decode().strip()
     try:
-        top = git(repo, "rev-parse", "--show-toplevel").decode().strip()
         with open(f"{top}/.privacy-allow", encoding="utf-8") as f:
             allowed = [l.strip() for l in f if l.strip() and not l.lstrip().startswith("#")]
     except (FileNotFoundError, subprocess.CalledProcessError):
         pass
 
     allowed_lower = [a.lower() for a in allowed]
+
+    base = args.since.strip()
+    if not base:
+        try:
+            with open(f"{top}/.privacy-baseline", encoding="utf-8") as f:
+                base = next((l.split()[0] for l in f if l.strip() and not l.lstrip().startswith("#")), "")
+        except (FileNotFoundError, NameError):
+            base = ""
+    if base and subprocess.run(["git", "-C", repo, "cat-file", "-e", f"{base}^{{commit}}"], capture_output=True).returncode != 0:
+        print(f"Warning: the starting commit {base[:7]} isn't in this copy, so every version is checked.")
+        base = ""
+    since = ["--not", base] if base else []
 
     def is_allowed(text):
         low = text.lower()
@@ -99,7 +116,13 @@ def main():
                 findings[(name, hit)].add(place)
 
     # Every object reachable from any branch, tag or pull request copy in this folder
-    listing = git(repo, "rev-list", "--all", "--objects").decode("utf-8", "replace").splitlines()
+    listing = git(repo, "rev-list", "--all", "--objects", *since).decode("utf-8", "replace").splitlines()
+    if base:  # the current files of every branch are always checked, even when they haven't changed
+        tips = git(repo, "for-each-ref", "--format=%(objectname)", "refs/heads", "refs/remotes", "refs/tags").decode().split()
+        for tip in sorted(set(tips)):
+            for row in git(repo, "ls-tree", "-r", "-t", tip).decode("utf-8", "replace").splitlines():
+                meta, _, path = row.partition("\t")
+                listing.append(f"{meta.split()[2]} {path}")
     paths = defaultdict(set)
     for line in listing:
         sha, _, path = line.partition(" ")
@@ -107,7 +130,7 @@ def main():
             paths[sha].add(path)
             if RISKY_FILES.search(path):
                 findings[("Risky file name", path)].add(path)
-    shas = [l.split(" ", 1)[0] for l in listing]
+    shas = list(dict.fromkeys(l.split(" ", 1)[0] for l in listing))
     out = git(repo, "cat-file", "--batch", data=("\n".join(shas) + "\n").encode())
     i = 0
     while i < len(out):
@@ -119,7 +142,7 @@ def main():
             look(body.decode("utf-8", "replace"), ", ".join(sorted(paths.get(sha, {"(file)"}))))
 
     # Commit names, emails and messages
-    log = git(repo, "log", "--all", "--format=%h%x00%an%x00%ae%x00%cn%x00%ce%x00%B%x01").decode("utf-8", "replace")
+    log = git(repo, "log", "--all", *since, "--format=%h%x00%an%x00%ae%x00%cn%x00%ce%x00%B%x01").decode("utf-8", "replace")
     people = set()
     for entry in log.split("\x01"):
         parts = entry.strip("\n").split("\x00")
@@ -132,8 +155,10 @@ def main():
                 findings[("Real email on a commit", email)].add(f"commit {h}")
         look(msg, f"commit message {h}")
 
-    commits = git(repo, "rev-list", "--all", "--count").decode().strip()
-    print(f"Checked {commits} commits and {len(shas)} stored objects.")
+    commits = git(repo, "rev-list", "--all", "--count", *since).decode().strip()
+    print(f"Checked {commits} commits and {len(set(shas))} stored objects.")
+    if base:
+        print(f"Versions from before {base[:7]} were skipped, as .privacy-baseline says. Current files were all checked.")
     if not args.ci:
         print("Names on commits: " + "; ".join(sorted(people)))
     if not findings:

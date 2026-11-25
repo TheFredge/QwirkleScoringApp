@@ -2,7 +2,7 @@
 
 These are the owner's standard rules for every repo. Follow them in every session, before changing anything. This file is a word-for-word copy of the master in the GitHub note in the owner's Obsidian vault (Homelab → Services → GitHub). If the vault tools are available, read that note first. If its rules version is newer than the one below, the note wins and this file should be updated to match (rule 8).
 
-Rules version: 2026-11-24.4
+Rules version: 2026-11-24.5
 
 Explain everything to the owner in plain language, not developer shorthand.
 
@@ -45,7 +45,7 @@ Explain everything to the owner in plain language, not developer shorthand.
 - **The automatic privacy check**, `.github/workflows/privacy-check.yml`. GitHub runs it after every push and emails the owner if it finds something. The words it looks for come from the repo's `PRIVACY_WORDS` secret (Settings → Secrets and variables → Actions), never from a file. Its results only name the kind of problem and the file, never the text found, because anyone can read a public repo's results.
 - **If it uses Supabase:** every table locked (row-level security on, nothing readable without an approved sign-in), and Supabase's security check reviewed after every database change.
 - **GitHub's secret scanning and push protection on.** They only catch known key formats, not names, emails or addresses, so they don't replace rule 6.
-- **`main` protected:** a GitHub ruleset (Settings → Rules → Rulesets) that blocks overwriting `main`'s history and deleting it. Only the owner turns it off, for example during a rule 7 clean-up.
+- **`main` protected (public repos):** a GitHub ruleset (Settings → Rules → Rulesets) that blocks overwriting `main`'s history and deleting it. Only the owner turns it off, for example during a rule 7 clean-up. Private repos are exempt: the free plan doesn't offer rulesets for them, and nobody else can reach them.
 - **Code from other people kept to a minimum and pinned.** Packages at exact versions with their lock file committed. A script a page loads from another site is pinned to an exact version with an integrity check (`integrity="…"` on the `<script>` tag), or copied into the repo. Add-ons used by GitHub's automatic checks are pinned to an exact commit ID. GitHub's security alerts (Dependabot alerts) on.
 - **If it's a Pages site:** the page sets its own security policy with a `<meta http-equiv="Content-Security-Policy">` tag that allows only its own files and the outside sites it really needs (Supabase, for example), because Pages can't send security headers.
 
